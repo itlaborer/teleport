@@ -47,14 +47,14 @@ import (
 const (
 	// SessionLogsDir is a subdirectory inside the eventlog data dir
 	// where all session-specific logs and streams are stored, like
-	// in /var/lib/teleport/logs/sessions
+	// in /var/lib/teleport/log/sessions
 	SessionLogsDir = "sessions"
 
-	// StreamingLogsDir is a subdirectory of sessions /var/lib/teleport/logs/streaming
+	// StreamingLogsDir is a subdirectory of sessions /var/lib/teleport/log/streaming
 	// is used in new versions of the uploader
 	StreamingLogsDir = "streaming"
 
-	// RecordsDir is a subdirectory with default records /var/lib/teleport/logs/records
+	// RecordsDir is a subdirectory with default records /var/lib/teleport/log/records
 	// is used in new versions of the uploader
 	RecordsDir = "records"
 

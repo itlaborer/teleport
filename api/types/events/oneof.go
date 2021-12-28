@@ -293,6 +293,10 @@ func ToOneOf(in AuditEvent) (*OneOf, error) {
 		out.Event = &OneOf_WindowsDesktopSessionEnd{
 			WindowsDesktopSessionEnd: e,
 		}
+	case *DesktopRecording:
+		out.Event = &OneOf_DesktopRecording{
+			DesktopRecording: e,
+		}
 	default:
 		return nil, trace.BadParameter("event type %T is not supported", in)
 	}
@@ -430,6 +434,8 @@ func FromOneOf(in OneOf) (AuditEvent, error) {
 	} else if e := in.GetWindowsDesktopSessionStart(); e != nil {
 		return e, nil
 	} else if e := in.GetWindowsDesktopSessionEnd(); e != nil {
+		return e, nil
+	} else if e := in.GetDesktopRecording(); e != nil {
 		return e, nil
 	} else {
 		if in.Event == nil {
