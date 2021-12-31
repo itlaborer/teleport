@@ -502,7 +502,7 @@ func (idx *sessionIndex) chunksFile(offset int64) (string, int64, error) {
 			return idx.chunksFileName(i), entry.Offset, nil
 		}
 	}
-	return "", 0, trace.NotFound("%v not found", offset)
+	return "", 0, trace.NotFound("offset %v not found for session %v", offset, idx.sid)
 }
 
 func (idx *sessionIndex) chunksFileName(index int) string {
@@ -1052,7 +1052,7 @@ func (l *AuditLog) StreamSessionEvents(ctx context.Context, sessionID session.ID
 	tarballPath := filepath.Join(l.playbackDir, string(sessionID)+".stream.tar")
 	downloadCtx, cancel := l.createOrGetDownload(tarballPath)
 
-	// Wait until another in progress download finishes and use it's tarball.
+	// Wait until another in progress download finishes and use its tarball.
 	if cancel == nil {
 		l.log.Debugf("Another download is in progress for %v, waiting until it gets completed.", sessionID)
 		select {

@@ -594,6 +594,14 @@ func (s *WindowsService) connectRDP(ctx context.Context, log logrus.FieldLogger,
 		return trace.Wrap(err)
 	}
 
+	defer func() {
+		go func() {
+			if err := sw.Close(context.Background()); err != nil {
+				log.WithError(err).Errorf("closing stream writer for desktop session %v", sessionID.String())
+			}
+		}()
+	}()
+
 	var windowsUser string
 	authorize := func(login string) error {
 		windowsUser = login // capture attempted login user
@@ -603,17 +611,18 @@ func (s *WindowsService) connectRDP(ctx context.Context, log logrus.FieldLogger,
 			services.NewWindowsLoginMatcher(login))
 	}
 
+	delay := timer()
 	tdpConn := tdp.NewConn(conn)
 	tdpConn.OnSend = func(m tdp.Message, b []byte) {
 		switch b[0] {
-		case byte(tdp.TypePNGFrame), byte(tdp.TypeClientScreenSpec), byte(tdp.TypeClipboardData):
+		case byte(tdp.TypePNGFrame), byte(tdp.TypeClientScreenSpec), byte(tdp.TypeClipboardData), byte(tdp.TypeMouseButton):
 			if err := sw.EmitAuditEvent(ctx, &events.DesktopRecording{
 				Metadata: events.Metadata{
 					Type: libevents.DesktopRecordingEvent,
 					Time: s.cfg.Clock.Now().UTC().Round(time.Millisecond),
 				},
 				Message:           b,
-				DelayMilliseconds: 0, // TODO(zmb3): AuditWriter should set this for us if necessary
+				DelayMilliseconds: delay(), // TODO(zmb3): AuditWriter should set this for us if necessary
 			}); err != nil {
 				s.cfg.Log.WithError(err).Warning("could not emit desktop recording event")
 			}
@@ -741,6 +750,20 @@ func (s *WindowsService) nameForStaticHost(addr string) (string, error) {
 	parts := strings.Split(s.cfg.Heartbeat.HostUUID, "-")
 	prefix := parts[len(parts)-1]
 	return prefix + "-static-" + strings.ReplaceAll(host, ".", "-"), nil
+}
+
+// timer returns a closer that on each call returns the
+// number of milliseconds that have elapsed since the first call.
+// it returns 0 on the very first call.
+func timer() func() int64 {
+	var first time.Time
+	return func() int64 {
+		if first.IsZero() {
+			first = time.Now()
+			return 0
+		}
+		return int64(time.Since(first) / time.Millisecond)
+	}
 }
 
 func (s *WindowsService) updateCA(ctx context.Context) error {
