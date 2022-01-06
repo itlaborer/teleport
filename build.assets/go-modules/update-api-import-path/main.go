@@ -14,15 +14,14 @@ limitations under the License.
 // Command update-api-import-path updates the api import path to
 // incorporate the version set in /api/version.go. If the major
 // version hasn't changed or the version is a prelease, no change
-// is made. Otherwise, all go.mod files, .go files, and .proto files
-// are updated to use the new api import path as needed.
+// is made. Otherwise, all go.mod files and .go files are updated
+// to use the new api import path.
 package main
 
 import (
 	"bytes"
 	"fmt"
 	"go/format"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +43,7 @@ func init() {
 }
 
 // This script should only be run through the make target `make update-api-module-path`
-// since it relies on relative paths to the api and root directories.
+// since it relies on relative paths to the /api and root directories.
 func main() {
 	var buildFlags []string
 	if len(os.Args) > 1 {
@@ -81,12 +80,6 @@ func main() {
 	log.Info("Updating teleport module...")
 	if err := updateGoModule("./", currentModPath, newPath, newVersion.String(), buildFlags, addRollBack); err != nil {
 		exitWithError(trace.Wrap(err, "failed to update teleport module"), rollBackFuncs)
-	}
-
-	// Update .proto files in teleport/api to use the new import path
-	log.Info("Updating .proto files...")
-	if err := updateProtoFiles("./api", currentModPath, newPath, addRollBack); err != nil {
-		exitWithError(trace.Wrap(err, "failed to update teleport mod file"), rollBackFuncs)
 	}
 }
 
@@ -239,43 +232,6 @@ func updateGoModFile(dir, oldPath, newPath, newVersion string, addRollBackFunc a
 	})
 
 	return nil
-}
-
-// updateProtoFiles updates gogoproto cast types and custom types in .proto files
-// within the given directory to use the new api import path.
-func updateProtoFiles(rootDir, currentPath, newPath string, addRollBackFunc addRollBackFunc) error {
-	return filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		if strings.HasSuffix(d.Name(), ".proto") {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return trace.Wrap(err)
-			}
-
-			// Replace all instances of the api import path in gogoproto casttypes with the new import path
-			currentCastTypes := fmt.Sprintf(`(gogoproto.casttype) = "%v`, currentPath)
-			newCastTypes := fmt.Sprintf(`(gogoproto.casttype) = "%v`, newPath)
-			updatedData := bytes.ReplaceAll(data, []byte(currentCastTypes), []byte(newCastTypes))
-
-			// Replace all instances of the api import path in gogoproto customtypes with the new import path
-			currentCustomTypes := fmt.Sprintf(`(gogoproto.customtype) = "%v`, currentPath)
-			newCustomTypes := fmt.Sprintf(`(gogoproto.customtype) = "%v`, newPath)
-			updatedData = bytes.ReplaceAll(updatedData, []byte(currentCustomTypes), []byte(newCustomTypes))
-
-			fileMode := d.Type().Perm()
-			if err := os.WriteFile(path, updatedData, fileMode); err != nil {
-				return trace.Wrap(err)
-			}
-
-			addRollBackFunc(func() error {
-				err := os.WriteFile(path, data, fileMode)
-				return trace.Wrap(err, "failed to rollback changes to proto file %v", path)
-			})
-		}
-		return nil
-	})
 }
 
 // getNewModImportPath gets the new import path given a go module import path and the updated version

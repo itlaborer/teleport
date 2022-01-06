@@ -752,16 +752,14 @@ devbox-grpc:
 		lib/multiplexer/test/ping.proto \
 		lib/web/envelope.proto
 
-	# protoc is not aware of go modules, so generated go files fail to read
-	# from the correct api import path unless explicitly told where to look.
+	# gogoproto is not aware of go modules, so generated go files fail to read
+	# from the correct api import path for cast types and custom types unless 
+	# explicitly told where to look.
 	$(eval API_IMPORT_PATH=$(shell go run build.assets/go-modules/print-api-import-path/main.go))
 
 	protoc -I=.:$$PROTO_INCLUDE \
 		--proto_path=api/client/proto \
 		--gogofast_out=plugins=grpc,\
-Mgithub.com/gravitational/teleport/api/types/types.proto=$$API_IMPORT_PATH/types,\
-Mgithub.com/gravitational/teleport/api/types/webauthn/webauthn.proto=$$API_IMPORT_PATH/types/webauthn,\
-Mgithub.com/gravitational/teleport/api/types/wrappers/wrappers.proto=$$API_IMPORT_PATH/types/wrappers,\
 Mgithub.com/gravitational/teleport/api/types/events/events.proto=$$API_IMPORT_PATH/types/events:\
 $$GOPATH/src \
 		authservice.proto

@@ -69,56 +69,6 @@ import (
 	readAndCompareFile(t, goFilePath, goFile)
 }
 
-func TestUpdateProtoFiles(t *testing.T) {
-	protoFile := `syntax = "proto3";
-package proto;
-
-import "mod/path/types.proto";
-
-message Example {
-	types.Type field1 = 1 [
-		(gogoproto.casttype) = "mod/path/types.Traits"
-	];
-	types.Type field2 = 2 [
-		(gogoproto.customtype) = "mod/path/types.Traits"
-	];
-}
-`
-
-	// Only update casttype and customtype options.
-	updatedProtoFile := `syntax = "proto3";
-package proto;
-
-import "mod/path/types.proto";
-
-message Example {
-	types.Type field1 = 1 [
-		(gogoproto.casttype) = "mod/path/v2/types.Traits"
-	];
-	types.Type field2 = 2 [
-		(gogoproto.customtype) = "mod/path/v2/types.Traits"
-	];
-}
-`
-
-	// Write proto file to disk
-	dir := t.TempDir()
-
-	// Run proto file through update function
-	protoFilePath := writeFile(t, dir, "proto.proto", protoFile)
-	addRollBack := testRollBack(t, protoFilePath, protoFile)
-	err := updateProtoFiles(dir, "mod/path", "mod/path/v2", addRollBack)
-	require.NoError(t, err)
-	readAndCompareFile(t, protoFilePath, updatedProtoFile)
-
-	// Run updated proto file through update function
-	protoFilePath = writeFile(t, dir, "proto.proto", updatedProtoFile)
-	addRollBack = testRollBack(t, protoFilePath, updatedProtoFile)
-	err = updateProtoFiles(dir, "mod/path/v2", "mod/path", addRollBack)
-	require.NoError(t, err)
-	readAndCompareFile(t, protoFilePath, protoFile)
-}
-
 func TestUpdateGoModulePath(t *testing.T) {
 	testUpdate := func(oldModPath, newModPath, newModVersion, oldModFile, expectedNewModFile string) func(t *testing.T) {
 		return func(t *testing.T) {
