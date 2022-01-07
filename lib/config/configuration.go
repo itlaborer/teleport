@@ -1285,14 +1285,6 @@ func applyWindowsDesktopConfig(fc *FileConfig, cfg *service.Config) error {
 			fc.WindowsDesktop.LDAP.PasswordFile)
 	}
 
-	// If a CA file is provided but InsecureSkipVerify is also set to true, throw an
-	// error to make sure the user isn't making a critical security mistake (i.e. thinking
-	// that their LDAPS connection is being verified to be with the CA provided, but it isn't
-	// due to InsecureSkipVerify == true ).
-	if fc.WindowsDesktop.LDAP.DEREncodedCAFile != "" && fc.WindowsDesktop.LDAP.InsecureSkipVerify {
-		return trace.BadParameter("a CA file was provided but insecure_skip_verify was also set to true; confirm that you really want CA verification to be skipped by deleting or commenting-out the der_ca_file configuration value")
-	}
-
 	var cert *x509.Certificate
 	if fc.WindowsDesktop.LDAP.DEREncodedCAFile != "" {
 		rawCert, err := os.ReadFile(fc.WindowsDesktop.LDAP.DEREncodedCAFile)

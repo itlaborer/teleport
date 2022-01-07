@@ -19,6 +19,7 @@ package rdpclient
 
 import (
 	"context"
+	"time"
 
 	"github.com/gravitational/teleport/lib/srv/desktop/tdp"
 	"github.com/gravitational/trace"
@@ -48,7 +49,7 @@ type Config struct {
 }
 
 // GenerateUserCertFn generates user certificates for RDP authentication.
-type GenerateUserCertFn func(ctx context.Context, username string) (certDER, keyDER []byte, err error)
+type GenerateUserCertFn func(ctx context.Context, username string, ttl time.Duration) (certDER, keyDER []byte, err error)
 
 //nolint:unused
 func (c *Config) checkAndSetDefaults() error {

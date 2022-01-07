@@ -63,6 +63,13 @@ const (
 	// deliberately set to a small value to give enough time to establish a
 	// single desktop session.
 	windowsDesktopCertTTL = 5 * time.Minute
+
+	// windowsDesktopServiceCertTTL is the TTL for certificates issued to the
+	// Windows Desktop Service in order to authenticate with the LDAP server.
+	// It is set longer than the Windows certificates for users because it is
+	// not used for interactive login and is only used when issuing certs for
+	// a restrictive service account.
+	windowsDesktopServiceCertTTL = 8 * time.Hour
 )
 
 // WindowsService implements the RDP-based Windows desktop access service.
@@ -272,6 +279,17 @@ func NewWindowsService(cfg WindowsServiceConfig) (*WindowsService, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	// It's possible to provide a CA certificate for the LDAP server
+	// and to skip TLS valdiation, though this may be an error, so try
+	// to warn the user.
+	// (You may need this configuration in order to use certificates to
+	// authenticate with LDAP when the LDAP server name is not correct
+	// in the certificate).
+	if cfg.LDAPConfig.CA != nil && cfg.LDAPConfig.InsecureSkipVerify {
+		cfg.Log.Warn("LDAP configuration specifies both der_ca_file and insecure_skip_verify." +
+			"TLS connections to the LDAP server will not be verified. If this is intentional, disregard this warning.")
+	}
+
 	clusterName, err := cfg.AccessPoint.GetClusterName()
 	if err != nil {
 		return nil, trace.Wrap(err, "fetching cluster name: %v", err)
@@ -311,6 +329,10 @@ func NewWindowsService(cfg WindowsServiceConfig) (*WindowsService, error) {
 		clusterName: clusterName.GetClusterName(),
 		closeCtx:    ctx,
 		close:       close,
+	}
+
+	if err := s.testCertificateAuthForLDAP(); err != nil {
+		s.cfg.Log.WithError(err).Error("using LDAP cert auth")
 	}
 
 	// Note: admin still needs to import our CA into the Group Policy following
@@ -353,6 +375,83 @@ func NewWindowsService(cfg WindowsServiceConfig) (*WindowsService, error) {
 	}
 
 	return s, nil
+}
+
+// testCertificateAuthForLDAP is temporary code to verify that we can connect
+// to LDAP using a Teleport-issued certificate.
+// TODO: remove and replace WindowsService's LDAP client with this one
+func (s *WindowsService) testCertificateAuthForLDAP() error {
+	// trim the NETBIOS name from the configuration
+	user := s.cfg.Username
+	if i := strings.LastIndex(s.cfg.Username, `\`); i != -1 {
+		user = user[i+1:]
+	}
+
+	// TODO: set up a monitor to re-issue the cert and create a new LDAP client as we appraoch expiration
+	certDER, keyDER, err := s.generateCredentials(context.Background(), user, s.cfg.Domain, windowsDesktopServiceCertTTL)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return trace.Wrap(err, "parsing cert DER")
+	}
+
+	key, err := x509.ParsePKCS1PrivateKey(keyDER)
+	if err != nil {
+		return trace.Wrap(err, "parsing key DER")
+	}
+
+	tc := &tls.Config{
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{cert.Raw},
+				PrivateKey:  key,
+			},
+		},
+		InsecureSkipVerify: s.cfg.InsecureSkipVerify,
+	}
+
+	if s.cfg.CA != nil {
+		pool := x509.NewCertPool()
+		pool.AddCert(s.cfg.CA)
+		tc.RootCAs = pool
+	}
+
+	lc, err := ldap.DialURL("ldaps://"+s.cfg.Addr, ldap.DialWithTLSConfig(tc))
+	// lc, err := ldap.DialURL("ldap://" + strings.ReplaceAll(s.cfg.Addr, ":636", ":389"))
+	if err != nil {
+		return trace.Wrap(err, "dial")
+	}
+	defer lc.Close()
+
+	// if err := lc.StartTLS(tc); err != nil {
+	// 	return trace.Wrap(err, "StartTLS")
+	// }
+
+	if err := lc.ExternalBind(); err != nil {
+		return trace.Wrap(err, "external bind")
+	}
+
+	req := ldap.NewSearchRequest(
+		"CN=NTAuthCertificates,CN=Public Key Services,CN=Services,CN=Configuration,"+s.cfg.LDAPConfig.domainDN(),
+		ldap.ScopeWholeSubtree,
+		ldap.DerefAlways,
+		0,     // no SizeLimit
+		0,     // no TimeLimit
+		false, // TypesOnly == false, we want attribute values
+		"(objectClass=certificationAuthority)",
+		[]string{"cACertificate"},
+		nil, // no Controls
+	)
+	res, err := lc.Search(req)
+	if err != nil {
+		return trace.Wrap(err, "performing LDAP search")
+	}
+
+	s.cfg.Log.Warnf("found %d certificationAuthorities", len(res.Entries))
+	return nil
 }
 
 func (s *WindowsService) startServiceHeartbeat() error {
@@ -530,8 +629,8 @@ func (s *WindowsService) connectRDP(ctx context.Context, log logrus.FieldLogger,
 	tdpConn := tdp.NewConn(conn)
 	rdpc, err := rdpclient.New(ctx, rdpclient.Config{
 		Log: log,
-		GenerateUserCert: func(ctx context.Context, username string) (certDER, keyDER []byte, err error) {
-			return s.generateCredentials(ctx, username, desktop.GetDomain())
+		GenerateUserCert: func(ctx context.Context, username string, ttl time.Duration) (certDER, keyDER []byte, err error) {
+			return s.generateCredentials(ctx, username, desktop.GetDomain(), ttl)
 		},
 		Addr:          desktop.GetAddr(),
 		InputMessage:  tdpConn.InputMessage,
@@ -801,7 +900,7 @@ func (s *WindowsService) crlContainerDN() string {
 // the regular Teleport user certificate, to meet the requirements of Active
 // Directory. See:
 // https://docs.microsoft.com/en-us/windows/security/identity-protection/smart-cards/smart-card-certificate-requirements-and-enumeration
-func (s *WindowsService) generateCredentials(ctx context.Context, username, domain string) (certDER, keyDER []byte, err error) {
+func (s *WindowsService) generateCredentials(ctx context.Context, username, domain string, ttl time.Duration) (certDER, keyDER []byte, err error) {
 	// Important: rdpclient currently only supports 2048-bit RSA keys.
 	// If you switch the key type here, update handle_general_authentication in
 	// rdp/rdpclient/src/piv.rs accordingly.
@@ -856,7 +955,7 @@ func (s *WindowsService) generateCredentials(ctx context.Context, username, doma
 		// domain_controller_addr) will cause Windows to fetch the CRL from any
 		// of its current domain controllers.
 		CRLEndpoint: fmt.Sprintf("ldap:///%s?certificateRevocationList?base?objectClass=cRLDistributionPoint", crlDN),
-		TTL:         proto.Duration(windowsDesktopCertTTL),
+		TTL:         proto.Duration(ttl),
 	})
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
