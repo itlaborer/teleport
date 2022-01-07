@@ -41,8 +41,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/gravitational/teleport"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/profile"
@@ -65,6 +63,8 @@ import (
 	"github.com/gravitational/teleport/lib/srv"
 	"github.com/gravitational/teleport/lib/sshutils"
 	"github.com/gravitational/teleport/lib/utils"
+	"golang.org/x/crypto/ssh"
+	"google.golang.org/grpc/grpclog"
 
 	"github.com/gravitational/trace"
 	"github.com/pborman/uuid"
@@ -203,6 +203,10 @@ func TestIntegrations(t *testing.T) {
 	t.Run("TwoClustersTunnel", suite.bind(testTwoClustersTunnel))
 	t.Run("UUIDBasedProxy", suite.bind(testUUIDBasedProxy))
 	t.Run("WindowChange", suite.bind(testWindowChange))
+}
+
+func TestZZ_FAIL(t *testing.T) {
+	require.FailNow(t, "failed")
 }
 
 // testAuditOn creates a live session, records a bunch of data through it
@@ -613,6 +617,8 @@ func testInteroperability(t *testing.T, suite *integrationTestSuite) {
 // TestMain will re-execute Teleport to run a command if "exec" is passed to
 // it as an argument. Otherwise it will run tests as normal.
 func TestMain(m *testing.M) {
+	grpclog.SetLoggerV2(grpclog.NewLoggerV2WithVerbosity(os.Stderr, os.Stderr, os.Stderr, 99))
+
 	utils.InitLoggerForTests()
 	// If the test is re-executing itself, execute the command that comes over
 	// the pipe.
